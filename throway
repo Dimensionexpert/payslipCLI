@@ -1,0 +1,10 @@
+
+		pan := cleanCell(row[colPAN])
+		if pan == "" {
+			return fmt.Errorf("row %d: missing Pan", rowNum)
+		}
+
+		aadhar := cleanCell(row[colAadhaar])
+		if aadhar == "" {
+			return fmt.Errorf("row %d: missing Aadhar", rowNum)
+		}
