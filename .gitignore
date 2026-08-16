@@ -3,3 +3,9 @@
 *.db-shm
 *.db-wal
 output/
+
+# raw monthly govt excel exports — real employee data, keep out of git
+*.xlsx
+!template.xlsx
+
+.~lock.*#
