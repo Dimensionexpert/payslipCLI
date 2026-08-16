@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/joho/godotenv"
 
@@ -22,6 +23,7 @@ func main() {
 	}
 
 	excelPath := flag.String("f", "", "path to the govt xlsx export")
+	outputDir := flag.String("o", "output", "output directory for generated files")
 	month := flag.Int("m", 0, "pay period month (1-12)")
 	year := flag.Int("y", 0, "pay period year")
 	flag.Parse()
@@ -86,15 +88,14 @@ func main() {
 	log.Printf("fetched %d payslip export records", len(payslipData))
 
 	// Create output directories
-	if err := os.MkdirAll("output/pdf", 0755); err != nil {
-		log.Fatalf("creating pdf output dir: %v", err)
+	if err := os.MkdirAll(filepath.Join(*outputDir, "pdf"), 0755); err != nil {
+		log.Fatalf("creating output dir: %v", err)
 	}
-
 	// Generate XLSX (sequential — fast, no benefit from concurrency here)
 	done = timer.Track("xlsx generation")
 	var xlsxPaths []string
 	for _, entry := range payslipData {
-		xlsxPath, err := excelgen.GeneratePayslip("template.xlsx", "output", entry)
+		xlsxPath, err := excelgen.GeneratePayslip("template.xlsx", *outputDir, entry)
 		if err != nil {
 			log.Fatalf("generating payslip for %s: %v", entry.Employee.Name, err)
 		}
@@ -104,7 +105,7 @@ func main() {
 
 	// Convert to PDF using a worker pool (2 workers, given sisyphus's 4GB RAM)
 	done = timer.Track("pdf conversion")
-	results := concurrency.RunPDFConversion(xlsxPaths, 4)
+	results := concurrency.RunPDFConversion(xlsxPaths, 4, filepath.Join(*outputDir, "pdf"))
 	done()
 
 	failures := 0

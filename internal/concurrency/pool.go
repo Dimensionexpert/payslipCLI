@@ -11,26 +11,22 @@ type ConversionResult struct {
 	Filepath string
 }
 
-func pdfWorker(workerID int, jobs <-chan string, results chan<- ConversionResult, wg *sync.WaitGroup) {
+func pdfWorker(workerID int, jobs <-chan string, results chan<- ConversionResult, wg *sync.WaitGroup, outDir string) {
 	defer wg.Done()
-
 	for path := range jobs {
-		err := pdfgen.ConvertToPDF(path, "output/pdf", workerID)
-		results <- ConversionResult{
-			Filepath: path,
-			Err:      err,
-		}
+		err := pdfgen.ConvertToPDF(path, outDir, workerID)
+		results <- ConversionResult{Filepath: path, Err: err}
 	}
 }
 
-func RunPDFConversion(paths []string, numWorkers int) []ConversionResult {
+func RunPDFConversion(paths []string, numWorkers int, outDir string) []ConversionResult {
 	jobs := make(chan string, len(paths))
 	results := make(chan ConversionResult, len(paths))
 
 	var wg sync.WaitGroup
 	for i := 1; i <= numWorkers; i++ {
 		wg.Add(1)
-		go pdfWorker(i, jobs, results, &wg)
+		go pdfWorker(i, jobs, results, &wg, outDir)
 	}
 
 	for _, p := range paths {
