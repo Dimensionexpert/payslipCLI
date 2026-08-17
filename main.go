@@ -2,9 +2,12 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 
@@ -15,6 +18,27 @@ import (
 	"github.com/Dimensionexpert/payslip/internal/timer"
 )
 
+const (
+	inboxDir  = "/srv/payslip/inbox"
+	outputDir = "/srv/payslip/output"
+)
+
+func parseMonthYearFromFilename(filename string) (int, int, error) {
+	base := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+	if len(base) != 4 {
+		return 0, 0, fmt.Errorf("expected filename like 0726.xlsx (MMYY), got %q", filename)
+	}
+	month, err := strconv.Atoi(base[0:2])
+	if err != nil || month < 1 || month > 12 {
+		return 0, 0, fmt.Errorf("invalid month in filename %q", filename)
+	}
+	yearSuffix, err := strconv.Atoi(base[2:4])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid year in filename %q", filename)
+	}
+	return month, 2000 + yearSuffix, nil
+}
+
 func main() {
 	defer timer.Track("total execution")()
 
@@ -22,15 +46,19 @@ func main() {
 		log.Println("no .env file found, relying on real env vars")
 	}
 
-	excelPath := flag.String("f", "", "path to the govt xlsx export")
-	outputDir := flag.String("o", "output", "output directory for generated files")
-	month := flag.Int("m", 0, "pay period month (1-12)")
-	year := flag.Int("y", 0, "pay period year")
+	filename := flag.String("f", "", "filename in inbox, e.g 0726.xlsx")
 	flag.Parse()
 
-	if *excelPath == "" || *month == 0 || *year == 0 {
-		log.Fatal("missing required flags — example: ./payslip -f=Aug26.xlsx -m=8 -y=2026")
+	if *filename == "" {
+		log.Fatal("missing required flag — example: ./payslip -f=0726.xlsx")
 	}
+
+	month, year, err := parseMonthYearFromFilename(*filename)
+	if err != nil {
+		log.Fatalf("bad filename: %v", err)
+	}
+
+	excelPath := filepath.Join(inboxDir, *filename)
 
 	// Open database
 	done := timer.Track("database open")
@@ -43,7 +71,7 @@ func main() {
 
 	// Parse Excel
 	done = timer.Track("excel parsing")
-	result, err := importer.ParseExcel(*excelPath, *month, *year)
+	result, err := importer.ParseExcel(excelPath, month, year)
 	if err != nil {
 		log.Fatalf("parse failed: %v", err)
 	}
@@ -88,14 +116,15 @@ func main() {
 	log.Printf("fetched %d payslip export records", len(payslipData))
 
 	// Create output directories
-	if err := os.MkdirAll(filepath.Join(*outputDir, "pdf"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(outputDir, "pdf"), 0755); err != nil {
 		log.Fatalf("creating output dir: %v", err)
 	}
+
 	// Generate XLSX (sequential — fast, no benefit from concurrency here)
 	done = timer.Track("xlsx generation")
 	var xlsxPaths []string
 	for _, entry := range payslipData {
-		xlsxPath, err := excelgen.GeneratePayslip("template.xlsx", *outputDir, entry)
+		xlsxPath, err := excelgen.GeneratePayslip("template.xlsx", outputDir, entry)
 		if err != nil {
 			log.Fatalf("generating payslip for %s: %v", entry.Employee.Name, err)
 		}
@@ -103,9 +132,9 @@ func main() {
 	}
 	done()
 
-	// Convert to PDF using a worker pool (2 workers, given sisyphus's 4GB RAM)
+	// Convert to PDF using a worker pool
 	done = timer.Track("pdf conversion")
-	results := concurrency.RunPDFConversion(xlsxPaths, 4, filepath.Join(*outputDir, "pdf"))
+	results := concurrency.RunPDFConversion(xlsxPaths, 4, filepath.Join(outputDir, "pdf"))
 	done()
 
 	failures := 0
